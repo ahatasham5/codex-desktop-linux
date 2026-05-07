@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-05-06
+
+### Fixed
+
+- Local auto-update rebuilds and package builds now find the Rust toolchain reliably when `cargo` is installed via `rustup` under `~/.cargo/bin`, even if the `codex-update-manager` user service or packaging scripts inherit a reduced `PATH`.
+
+### Added
+
+- Regression coverage for the build-environment fix: updater path construction now has a unit test for `~/.cargo/bin`, and packaging helpers resolve `cargo` through the same fallback path used by Linux Computer Use staging.
+
 ## [0.7.0] - 2026-05-04
 
 ### Added
