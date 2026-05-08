@@ -74,7 +74,7 @@ The first launch can auto-install the Codex CLI (`@openai/codex`) using the bund
 nix run github:ilysenko/codex-desktop-linux
 ```
 
-The flake handles dependencies and patches Electron for NixOS. A GitHub Actions bot keeps the upstream `Codex.dmg` SRI hash refreshed in `main` once per day. If you happen to try right after an upstream Codex release and hit `error: hash mismatch in fixed-output derivation`, wait up to a day for the bot and retry.
+The flake handles dependencies and patches Electron for NixOS. A GitHub Actions bot keeps the upstream `Codex.dmg` SRI hash and the recursive Nix payload `outputHash` refreshed in `main` every 2 hours. If you happen to try right after an upstream Codex release and hit `error: hash mismatch in fixed-output derivation`, wait for the next bot run and retry.
 
 `nix develop github:ilysenko/codex-desktop-linux` enters a dev shell with the required tooling.
 
