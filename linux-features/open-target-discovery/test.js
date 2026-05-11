@@ -235,6 +235,37 @@ test("open-target discovery finds IDEs from desktop entries", () => {
   });
 });
 
+test("open-target discovery respects hidden desktop entry overrides", () => {
+  withTempDir((tmp) => {
+    const dataHome = path.join(tmp, "user-share");
+    const userAppsDir = path.join(dataHome, "applications");
+    const systemShare = path.join(tmp, "system-share");
+    const systemAppsDir = path.join(systemShare, "applications");
+    const electronCommand = makeExecutable(path.join(tmp, "bin"), "electron37");
+    fs.mkdirSync(userAppsDir, { recursive: true });
+    fs.mkdirSync(systemAppsDir, { recursive: true });
+    fs.writeFileSync(path.join(userAppsDir, "electron37.desktop"), "[Desktop Entry]\nHidden=true\n");
+    fs.writeFileSync(
+      path.join(systemAppsDir, "electron37.desktop"),
+      [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Electron 37",
+        `Exec=${electronCommand} %u`,
+        "Categories=Development;GTK;",
+      ].join("\n"),
+    );
+
+    const targets = evaluatePatched(
+      openTargetsBundle,
+      { HOME: tmp, PATH: path.join(tmp, "bin"), XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: systemShare },
+      "Xg.flatMap((target)=>{let platform=target.platforms.linux;return platform?[platform.label]:[]})",
+    );
+
+    assert.equal(targets.includes("Electron 37"), false);
+  });
+});
+
 test("open-target discovery upgrades the baseline file manager target", async () => {
   await withTempDir(async (tmp) => {
     const binDir = path.join(tmp, "bin");
