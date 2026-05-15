@@ -264,7 +264,7 @@ PY
 
         codexDesktopComputerUseUiPayload = mkCodexDesktopPayload {
           enableComputerUseUi = true;
-          outputHash = "sha256-bOjhutEpccYUYl3SfFhNoNOVZJKnsVaYeIVOANcA+a8=";
+          outputHash = "sha256-5Th9zylhkqOpB5PuFjmeTKSVDVSlDys3Mdk9FMBlHAM=";
         };
 
         mkCodexDesktop = { pname ? "codex-desktop", payload }:
