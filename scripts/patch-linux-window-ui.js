@@ -54,7 +54,6 @@ const {
 } = require("./patches/launch-actions.js");
 const {
   applyBrowserUseNodeReplApprovalPatch,
-  applyLinuxBrowserUseIabVisibleOnCreatePatch,
   applyLinuxChromeExtensionStatusPatch,
   applyLinuxExplicitIpcQuitPatch,
   applyLinuxExplicitQuitPromptBypassPatch,
@@ -134,6 +133,11 @@ function main() {
 
 if (require.main === module) {
   main();
+}
+
+function applyLinuxBrowserUseIabVisibleOnCreatePatch(currentSource) {
+  // Compatibility shim for old callers after the runtime patch was removed.
+  return currentSource;
 }
 
 module.exports = {

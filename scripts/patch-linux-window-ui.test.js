@@ -316,7 +316,6 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-computer-use-plugin-gate",
     "linux-chrome-plugin-auto-install",
     "browser-use-node-repl-approval",
-    "linux-browser-use-iab-visible-on-create",
     "linux-chrome-extension-status",
     "linux-remote-control-config-preservation",
     "linux-app-updater-menu",
@@ -2098,34 +2097,21 @@ test("patches all Browser Use node_repl approval configs in one pass", () => {
   assert.doesNotMatch(patched, /startup_timeout_sec:120,env:\{/);
 });
 
-test("shows the Linux IAB panel after Browser Use creates or reuses a tab", () => {
+test("keeps removed IAB visible patch export as a no-op", () => {
+  const source = "class BrowserSessionRegistry{}";
+
+  assert.equal(applyLinuxBrowserUseIabVisibleOnCreatePatch(source), source);
+});
+
+test("patchMainBundleSource does not force the in-app browser panel visible", () => {
   const source =
     "var CF=class{async createTabForBrowserUse(e){let t=this.getActiveBrowserUseTab(e,{assertCurrentPageAllowed:!1});if(t!=null)return await this.navigateTabToInitialPage(t),this.serializeTab(t);let n=this.getRequiredBrowserHost(e);n.setBrowserUseActive(!0,e.turnId);let r=await n.openPageForBrowserUse({startingUrl:this.initialPageUrl,turnId:e.turnId}),i=this.updateTabForPage(r,n.routeKey);return SF().info(`IAB_LIFECYCLE iab createTab mapped page to tab`,{}),this.markBrowserUseCommandForTab(e,i),this.selectedTabIdsByRouteKey.set(n.routeKey,i.cdpTabId),this.serializeTab(i)}};";
 
-  const patched = applyPatchTwice(applyLinuxBrowserUseIabVisibleOnCreatePatch, source);
+  const patched = patchMainBundleSource(source, null);
 
-  assert.match(
-    patched,
-    /this\.getRequiredBrowserHost\(e\)\.setBrowserVisibleForBrowserUse\(!0,e\.turnId\)/,
-  );
-  assert.match(patched, /n\.setBrowserVisibleForBrowserUse\(!0,e\.turnId\)/);
-  assert.match(patched, /codexLinuxBrowserUseAutoVisible/);
-  assert.match(
-    patched,
-    /return \(\(\)=>\{try\{n\.setBrowserVisibleForBrowserUse\(!0,e\.turnId\)\}/,
-  );
-});
-
-test("patches all Browser Use IAB tab-creation paths in one pass", () => {
-  const source = [
-    "if(t!=null)return await this.navigateTabToInitialPage(t),this.serializeTab(t);let n=this.getRequiredBrowserHost(e);n.setBrowserUseActive(!0,e.turnId);let r=await n.openPageForBrowserUse({startingUrl:this.initialPageUrl,turnId:e.turnId}),i=this.updateTabForPage(r,n.routeKey);return",
-    "if(a!=null)return await this.navigateTabToInitialPage(a),this.serializeTab(a);let b=this.getRequiredBrowserHost(s);b.setBrowserUseActive(!0,s.turnId);let c=await b.openPageForBrowserUse({startingUrl:this.initialPageUrl,turnId:s.turnId}),d=this.updateTabForPage(c,b.routeKey);return",
-  ].join(";");
-
-  const patched = applyLinuxBrowserUseIabVisibleOnCreatePatch(source);
-
-  assert.equal((patched.match(/codexLinuxBrowserUseAutoVisible/g) || []).length, 4);
-  assert.doesNotMatch(patched, /return await this\.navigateTabToInitialPage\([ta]\),this\.serializeTab/);
+  assert.equal(patched, source);
+  assert.doesNotMatch(patched, /setBrowserVisibleForBrowserUse/);
+  assert.doesNotMatch(patched, /codexLinuxBrowserUseAutoVisible/);
 });
 
 test("detects Chrome extension installation from Linux browser profiles", () => {
