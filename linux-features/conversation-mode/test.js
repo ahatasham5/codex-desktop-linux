@@ -1065,6 +1065,99 @@ test("conversation runtime reads each completed assistant turn in a multi-turn r
   });
 });
 
+test("conversation runtime does not jump back to an older completed message while a newer live turn is pending", () => {
+  withConversationRuntime(({ events, timers }) => {
+    assert.equal(
+      globalThis.codexLinuxConversationToggle({
+        conversationId: "thread-a",
+        isResponseInProgress: false,
+        startDictation() {},
+        stopDictation() {},
+        onStop() {},
+      }),
+      true,
+    );
+    assert.equal(globalThis.codexLinuxConversationShouldSendTranscript("Run an answer with a tool gap.", "send"), true);
+    assert.equal(
+      globalThis.codexLinuxConversationSync("thread-a", {
+        isResponseInProgress: true,
+        startDictation() {},
+        stopDictation() {},
+        onStop() {},
+      }),
+      true,
+    );
+
+    const first = "First completed assistant section.";
+    const secondPartial = "Second assistant section is now being written";
+    const secondFinal = `${secondPartial} and it should be the next spoken text.`;
+    const old = "Older previous assistant message should never jump back into speech.";
+
+    globalThis.codexLinuxConversationAssistant({ completed: true }, first, "thread-a", "turn-one", false);
+    globalThis.codexLinuxConversationAssistant({ completed: false }, secondPartial, "thread-a", "turn-two", true);
+    globalThis.codexLinuxConversationAssistant({ completed: true }, old, "thread-a", "old-turn", false);
+    globalThis.codexLinuxConversationAssistant({ completed: true }, secondFinal, "thread-a", "turn-two", false);
+
+    assert.deepEqual(
+      fetchBodies(events)
+        .filter((body) => body.action === "speak")
+        .map((body) => body.text),
+      [first],
+    );
+
+    runTimer(timers, (timer) => timer.delay === 2900, "first speech timer");
+    assert.deepEqual(
+      fetchBodies(events)
+        .filter((body) => body.action === "speak")
+        .map((body) => body.text),
+      [first, secondFinal],
+    );
+  });
+});
+
+test("conversation runtime replaces a deferred old completed message when the next live turn appears", () => {
+  withConversationRuntime(({ events, timers }) => {
+    assert.equal(
+      globalThis.codexLinuxConversationToggle({
+        conversationId: "thread-a",
+        isResponseInProgress: false,
+        startDictation() {},
+        stopDictation() {},
+        onStop() {},
+      }),
+      true,
+    );
+    assert.equal(globalThis.codexLinuxConversationShouldSendTranscript("Run an answer across a tool gap.", "send"), true);
+    assert.equal(
+      globalThis.codexLinuxConversationSync("thread-a", {
+        isResponseInProgress: true,
+        startDictation() {},
+        stopDictation() {},
+        onStop() {},
+      }),
+      true,
+    );
+
+    const first = "First completed assistant section.";
+    const old = "Older completed assistant message re-rendered during the tool gap.";
+    const nextPartial = "Next assistant section starts streaming after the tool gap";
+    const nextFinal = `${nextPartial} and should replace the deferred old message.`;
+
+    globalThis.codexLinuxConversationAssistant({ completed: true }, first, "thread-a", "turn-one", false);
+    globalThis.codexLinuxConversationAssistant({ completed: true }, old, "thread-a", "old-turn", false);
+    globalThis.codexLinuxConversationAssistant({ completed: false }, nextPartial, "thread-a", "turn-two", true);
+    globalThis.codexLinuxConversationAssistant({ completed: true }, nextFinal, "thread-a", "turn-two", false);
+
+    runTimer(timers, (timer) => timer.delay === 2900, "first speech timer");
+    assert.deepEqual(
+      fetchBodies(events)
+        .filter((body) => body.action === "speak")
+        .map((body) => body.text),
+      [first, nextFinal],
+    );
+  });
+});
+
 test("conversation runtime speaks only the new suffix when the same assistant turn grows", () => {
   withConversationRuntime(({ events, timers }) => {
     assert.equal(
