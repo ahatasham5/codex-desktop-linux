@@ -151,24 +151,42 @@ test_package_payload_permission_normalization() {
     info "Checking package payload permission normalization"
     local root="$TMP_DIR/package-permissions"
     local app_root="$root/opt/codex-desktop"
+    local private_file="$app_root/.codex-linux/features/private/secret.txt"
 
-    mkdir -p "$app_root/content/webview" "$root/usr/bin"
+    mkdir -p "$app_root/content/webview" "$root/usr/bin" "$(dirname "$private_file")"
     printf '%s\n' '#!/bin/bash' 'echo start' > "$app_root/start.sh"
     printf '%s\n' '<!doctype html>' > "$app_root/content/webview/index.html"
     printf '%s\n' '#!/bin/bash' 'exec /opt/codex-desktop/start.sh "$@"' > "$root/usr/bin/codex-desktop"
+    printf '%s\n' 'secret' > "$private_file"
+    cat > "$app_root/.codex-linux/linux-features-staged.json" <<'JSON'
+{
+  "version": 1,
+  "resources": [
+    {
+      "id": "private",
+      "type": "resource",
+      "target": ".codex-linux/features/private/secret.txt",
+      "mode": "0600"
+    }
+  ],
+  "runtimeHooks": []
+}
+JSON
     chmod 0700 "$root/opt" "$app_root" "$app_root/content" "$app_root/content/webview"
     chmod 0700 "$app_root/start.sh" "$root/usr/bin/codex-desktop"
-    chmod 0600 "$app_root/content/webview/index.html"
+    chmod 0600 "$app_root/content/webview/index.html" "$private_file"
 
     # shellcheck disable=SC1091
     source "$REPO_DIR/scripts/lib/package-common.sh"
     normalize_package_payload_permissions "$root"
+    PACKAGE_NAME="codex-desktop" restore_linux_feature_payload_permissions "$root"
 
     assert_mode "$app_root" "755"
     assert_mode "$app_root/content/webview" "755"
     assert_mode "$app_root/start.sh" "755"
     assert_mode "$root/usr/bin/codex-desktop" "755"
     assert_mode "$app_root/content/webview/index.html" "644"
+    assert_mode "$private_file" "600"
 }
 
 test_deb_builder_smoke() {
@@ -269,16 +287,26 @@ test_update_builder_preserves_enabled_linux_features_config() {
     local workspace="$TMP_DIR/update-builder-linux-features"
     local root="$workspace/root"
     local app_dir="$workspace/app"
+    local features_root="$workspace/linux-features"
     local feature_config="$workspace/features.json"
     local staged_config="$root/opt/codex-desktop/update-builder/linux-features/features.json"
+    local staged_local_manifest="$root/opt/codex-desktop/update-builder/linux-features/local/local-tool/feature.json"
     local source_info="$root/opt/codex-desktop/update-builder/.codex-linux/source-info.json"
 
     mkdir -p "$workspace"
     make_fake_app "$app_dir"
+    mkdir -p "$features_root/example-feature" "$features_root/local/local-tool"
+    printf '%s\n' '# Linux Features' > "$features_root/README.md"
+    printf '%s\n' '{"enabled":[]}' > "$features_root/features.example.json"
+    printf '%s\n' '{"id":"example-feature","title":"Example Linux Feature"}' \
+        > "$features_root/example-feature/feature.json"
+    printf '%s\n' '{"id":"local-tool","title":"Local Tool"}' \
+        > "$features_root/local/local-tool/feature.json"
     cat > "$feature_config" <<'JSON'
 {
   "enabled": [
-    "example-feature"
+    "example-feature",
+    "local-tool"
   ],
   "localComment": "should not be packaged"
 }
@@ -288,6 +316,7 @@ JSON
         export APP_DIR="$app_dir"
         export PACKAGE_NAME="codex-desktop"
         export UPDATER_SERVICE_SOURCE="$REPO_DIR/packaging/linux/codex-update-manager.service"
+        export CODEX_LINUX_FEATURES_ROOT="$features_root"
         export CODEX_LINUX_FEATURES_CONFIG="$feature_config"
         export CODEX_LINUX_SOURCE_REMOTE="https://builder:secret-token@example.com/org/repo.git"
         export SOURCE_DATE_EPOCH="1710000000"
@@ -298,14 +327,16 @@ JSON
     )
 
     assert_file_exists "$staged_config"
+    assert_file_exists "$staged_local_manifest"
     assert_contains "$staged_config" "example-feature"
+    assert_contains "$staged_config" "local-tool"
     assert_not_contains "$staged_config" "localComment"
 
     node - "$staged_config" <<'NODE' || fail "Expected staged Linux features config to be sanitized"
 const fs = require("node:fs");
 const configPath = process.argv[2];
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-if (JSON.stringify(config) !== JSON.stringify({ enabled: ["example-feature"] })) {
+if (JSON.stringify(config) !== JSON.stringify({ enabled: ["example-feature", "local-tool"] })) {
   process.exit(1);
 }
 NODE
@@ -321,6 +352,50 @@ if (info.capturedAt !== new Date(1710000000 * 1000).toISOString()) {
   throw new Error(`unexpected capturedAt: ${info.capturedAt}`);
 }
 NODE
+}
+
+test_linux_feature_package_hook_discovery_failure_blocks_build() {
+    info "Checking Linux feature package hook discovery failure blocks package staging"
+    local workspace="$TMP_DIR/package-hook-discovery-failure"
+    local root="$workspace/root"
+    local app_dir="$workspace/app"
+    local features_root="$workspace/linux-features"
+    local feature_config="$features_root/features.json"
+    local output_log="$workspace/output.log"
+
+    mkdir -p "$root" "$features_root/bad-package-hook"
+    make_fake_app "$app_dir"
+    printf '%s\n' '{"enabled":[]}' > "$features_root/features.example.json"
+    cat > "$features_root/bad-package-hook/feature.json" <<'JSON'
+{
+  "id": "bad-package-hook",
+  "title": "Bad Package Hook",
+  "packageHooks": [
+    {
+      "path": "missing.sh",
+      "formats": ["deb"]
+    }
+  ]
+}
+JSON
+    printf '%s\n' '{"enabled":["bad-package-hook"]}' > "$feature_config"
+
+    if (
+        export APP_DIR="$app_dir"
+        export PACKAGE_NAME="codex-desktop"
+        export PACKAGE_VERSION="2026.03.24.120000+hookfailure"
+        export CODEX_LINUX_FEATURES_ROOT="$features_root"
+        export CODEX_LINUX_FEATURES_CONFIG="$feature_config"
+
+        # shellcheck disable=SC1091
+        source "$REPO_DIR/scripts/lib/package-common.sh"
+        run_linux_feature_package_hooks "$root" "deb"
+    ) >"$output_log" 2>&1; then
+        fail "Expected package hook discovery failure to stop package staging"
+    fi
+
+    assert_contains "$output_log" "Failed to discover Linux feature package hooks for deb"
+    assert_contains "$output_log" "packageHook 1 not found"
 }
 
 test_deb_builder_respects_package_identity() {
@@ -1139,6 +1214,30 @@ JSON
     assert_contains "$output_log" "Enabled Linux features: remote-mobile-control"
     assert_contains "$output_log" "Default native package mode includes codex-update-manager"
     assert_contains "$output_log" "make install-native"
+}
+
+test_setup_native_wizard_lists_local_features() {
+    info "Checking setup-native wizard discovers user-local Linux features"
+    local workspace="$TMP_DIR/setup-native-local-feature"
+    local features_root="$workspace/linux-features"
+    local config="$workspace/features.json"
+    local output_log="$workspace/output.log"
+
+    make_wizard_feature_root "$features_root"
+    mkdir -p "$features_root/local/local-tool"
+    printf '%s\n' '{"id":"local-tool","title":"Local Tool","description":"User-local integration."}' \
+        > "$features_root/local/local-tool/feature.json"
+    printf '%s\n' '{"enabled":[]}' > "$config"
+
+    CODEX_BOOTSTRAP_NONINTERACTIVE=1 \
+    CODEX_LINUX_FEATURES_ROOT="$features_root" \
+    CODEX_LINUX_FEATURES_CONFIG="$config" \
+    CODEX_LINUX_FEATURES="local-tool" \
+        bash "$REPO_DIR/scripts/bootstrap-wizard.sh" >"$output_log"
+
+    assert_json_enabled_equals "$config" '["local-tool"]'
+    assert_contains "$output_log" "local-tool \\[local\\] - Local Tool"
+    assert_contains "$output_log" "Enabled Linux features: local-tool"
 }
 
 test_setup_native_wizard_uses_package_name_for_installed_state() {
@@ -5046,6 +5145,7 @@ main() {
     test_package_payload_permission_normalization
     test_deb_builder_smoke
     test_update_builder_preserves_enabled_linux_features_config
+    test_linux_feature_package_hook_discovery_failure_blocks_build
     test_deb_builder_respects_package_identity
     test_deb_builder_without_updater
     test_no_updater_cleanup_helper_removes_inactive_user_enablement
@@ -5065,6 +5165,7 @@ main() {
     test_setup_native_wizard_accepts_numbered_feature_selection
     test_setup_native_wizard_rejects_out_of_range_feature_numbers
     test_setup_native_wizard_summary_keeps_existing_config
+    test_setup_native_wizard_lists_local_features
     test_setup_native_wizard_uses_package_name_for_installed_state
     test_setup_native_wizard_portal_summary_survives_busctl_sigpipe
     test_setup_native_wizard_warns_when_conversation_mode_lacks_read_aloud
