@@ -37,15 +37,28 @@ function applyFramelessTitlebarBranchPatch(currentSource) {
   return patchedSource;
 }
 
-// The overlay sync method appears in three shapes depending on upstream and
-// core-patch vintage: the un-widened upstream form (first replace), the
-// current upstream form with a win32/linux gate but a plain overlay helper
-// body (second replace), and the form produced by the core
-// linux-native-titlebar patch with a codexLinuxTitleBarOverlay ternary body
-// (third replace). All three must collapse to the win32-only form.
+// The zoom path and the overlay sync method each appear in multiple shapes
+// depending on upstream and core-patch vintage. setWindowZoom: a plain
+// overlay helper body, or a codexLinuxTitleBarOverlay ternary body after the
+// core linux-native-titlebar patch. Overlay sync: the un-widened upstream
+// form, the current upstream form with a win32/linux gate but a plain
+// overlay helper body, and the core-patched form with a
+// codexLinuxTitleBarOverlay ternary body. All must collapse to win32-only.
 function applyFramelessTitlebarOverlaySyncPatch(currentSource) {
   let patchedSource = currentSource.replace(
     /\(process\.platform===`win32`\|\|process\.platform===`linux`\)&&\(this\.windowZooms\.set\(([A-Za-z_$][\w$]*)\.id,([A-Za-z_$][\w$]*)\),\1\.setTitleBarOverlay\(([A-Za-z_$][\w$]*)\(\2\)\)\)/g,
+    (_match, windowAlias, zoomAlias, overlayHelperAlias) =>
+      `process.platform===\`win32\`&&(this.windowZooms.set(${windowAlias}.id,${zoomAlias}),${windowAlias}.setTitleBarOverlay(${overlayHelperAlias}(${zoomAlias})))`,
+  );
+
+  const linuxZoomOverlayTernaryRegex = new RegExp(
+    "\\(process\\.platform===`win32`\\|\\|process\\.platform===`linux`\\)&&\\(this\\.windowZooms\\.set\\(([A-Za-z_$][\\w$]*)\\.id,([A-Za-z_$][\\w$]*)\\),\\1\\.setTitleBarOverlay\\(process\\.platform===`linux`\\?" +
+      escapeRegExp(LINUX_TITLEBAR_OVERLAY_HELPER) +
+      "\\([^)]*\\):([A-Za-z_$][\\w$]*)\\(\\2\\)\\)\\)",
+    "g",
+  );
+  patchedSource = patchedSource.replace(
+    linuxZoomOverlayTernaryRegex,
     (_match, windowAlias, zoomAlias, overlayHelperAlias) =>
       `process.platform===\`win32\`&&(this.windowZooms.set(${windowAlias}.id,${zoomAlias}),${windowAlias}.setTitleBarOverlay(${overlayHelperAlias}(${zoomAlias})))`,
   );
