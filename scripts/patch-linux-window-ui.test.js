@@ -1743,9 +1743,11 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.doesNotMatch(patched, /let\[,l,u,d,f\]=c/);
   assert.doesNotMatch(patched, /this\.codexLinuxIsI3Session\(\)\)\{this\.codexLinuxStopAvatarPassthroughRecovery\(\),this\.codexLinuxAvatarInputShapeKey=null,this\.pointerInteractive=!0,this\.mousePassthroughEnabled&&\(this\.mousePassthroughEnabled=!1\),e\.setIgnoreMouseEvents\(!1\);return\}/);
   assert.match(patched, /if\(process\.platform===`linux`&&typeof e\.setShape==`function`\)\{/);
+  assert.match(patched, /if\(process\.platform===`linux`&&typeof e\.setShape==`function`\)\{this\.codexLinuxStartAvatarPassthroughRecovery\(\),/);
+  assert.doesNotMatch(patched, /if\(process\.platform===`linux`&&typeof e\.setShape==`function`\)\{this\.codexLinuxStopAvatarPassthroughRecovery\(\),/);
   assert.doesNotMatch(patched, /typeof e\.setShape==`function`&&!this\.codexLinuxIsI3Session\(\)/);
   assert.match(patched, /if\(t==null\)return null/);
-  assert.match(patched, /if\(t==null\)return!1;let n=JSON\.stringify\(t\)/);
+  assert.match(patched, /try\{let t=this\.codexLinuxBuildAvatarInputShape\(e\);if\(t==null\)return!1;let n=JSON\.stringify\(t\)/);
   assert.match(patched, /e\.setShape\(t\),this\.codexLinuxAvatarInputShapeKey=n;return!0/);
   assert.match(patched, /return\[i\(t\.mascot\),i\(t\.tray\)\]\.filter\(Boolean\)/);
   assert.match(patched, /process\.platform!==`linux`/);
@@ -1754,6 +1756,9 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.doesNotMatch(patched, /typeof e\.setShape==`function`\)return;this\.codexLinuxAvatarPassthroughRecoveryTimer=setInterval/);
   assert.match(patched, /this\.dragState!=null/);
   assert.match(patched, /this\.codexLinuxIsCursorInAvatarInteractiveRegion\(e\)/);
+  assert.match(patched, /__codexWindowHit=__codexX>=0&&__codexY>=0&&__codexX<=__codexBounds\.width&&__codexY<=__codexBounds\.height/);
+  assert.match(patched, /return __codexHit\(t\.mascot\)\|\|__codexHit\(t\.tray\)\|\|__codexWindowHit/);
+  assert.doesNotMatch(patched, /let r=r\.screen\.getCursorScreenPoint\(\)/);
   assert.match(patched, /catch\{t=!0\}/);
   assert.match(patched, /this\.pointerInteractive=t/);
   assert.match(patched, /displayBounds:n\.screen\.getDisplayNearestPoint\(n\.screen\.getCursorScreenPoint\(\)\)\.bounds\},process\.platform===`linux`&&\(this\.pointerInteractive=!0,this\.applyPointerInteractivityPolicy\(\)\)\}moveDrag\(e\)/);
@@ -1765,6 +1770,95 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.match(patched, /e\.moveTop\(\),e\.showInactive\(\),process\.platform===`linux`&&this\.codexLinuxApplyAvatarCompositorHints\(e\),process\.platform===`linux`&&this\.applyPointerInteractivityPolicy\(\)/);
   assert.doesNotMatch(patched, /codexLinuxRecoverAvatarPointerInteractivity/);
   assert.match(patched, /this\.window===t&&\(this\.codexLinuxStopAvatarPassthroughRecovery\(\),this\.codexLinuxAvatarInputShapeKey=null,this\.codexLinuxAvatarCompositorHintsApplied=!1,this\.codexLinuxAvatarCompositorHintsApplying=!1,this\.cancelMomentum\(\)/);
+});
+
+test("Linux avatar overlay treats visible window content as interactive fallback", () => {
+  const patched = applyPatchTwice(
+    applyLinuxAvatarOverlayMousePassthroughPatch,
+    avatarOverlayBundleFixture(),
+  );
+  const context = {
+    globalThis: {},
+    process: {
+      env: {},
+      pid: 123,
+      platform: "linux",
+    },
+    require(moduleName) {
+      assert.equal(moduleName, "node:child_process");
+      return { execFile() {} };
+    },
+    pV(bounds) {
+      return bounds;
+    },
+    n: {
+      app: {
+        getName: () => "Codex",
+      },
+      screen: {
+        getCursorScreenPoint: () => ({ x: 5765, y: 1088 }),
+        getDisplayNearestPoint: () => ({ bounds: { x: 0, y: 0, width: 800, height: 600 } }),
+      },
+    },
+  };
+  vm.runInNewContext(`${patched};globalThis.AvatarOverlayController=fV;`, context);
+
+  const controller = new context.globalThis.AvatarOverlayController(
+    { sendMessageToAllRegisteredWindows() {} },
+    { set() {} },
+  );
+  controller.layout = {
+    mascot: { left: 220, top: 190, width: 113, height: 122 },
+    tray: { left: 57, top: 55, width: 276, height: 131 },
+  };
+
+  assert.equal(
+    controller.codexLinuxIsCursorInAvatarInteractiveRegion({
+      getContentBounds: () => ({ x: 5743, y: 936, width: 356, height: 320 }),
+    }),
+    true,
+  );
+  assert.equal(
+    controller.codexLinuxIsCursorInAvatarInteractiveRegion({
+      getContentBounds: () => ({ x: 6000, y: 936, width: 100, height: 100 }),
+    }),
+    false,
+  );
+
+  const overlayWindow = {
+    isDestroyed: () => false,
+    getContentBounds: () => ({ x: 5743, y: 936, width: 356, height: 320 }),
+    setShape() {},
+  };
+  const serializeShape = (shape) => JSON.parse(JSON.stringify(shape));
+  assert.deepEqual(serializeShape(controller.codexLinuxBuildAvatarInputShape(overlayWindow)), [
+    { x: 220, y: 190, width: 113, height: 122 },
+    { x: 57, y: 55, width: 276, height: 131 },
+  ]);
+  controller.pointerInteractive = true;
+  assert.deepEqual(serializeShape(controller.codexLinuxBuildAvatarInputShape(overlayWindow)), [
+    { x: 0, y: 0, width: 356, height: 320 },
+  ]);
+  assert.equal(
+    controller.codexLinuxApplyAvatarInputShape({
+      isDestroyed: () => false,
+      getContentBounds: () => {
+        throw new Error("drift");
+      },
+      setShape() {},
+    }),
+    false,
+  );
+  assert.equal(
+    controller.codexLinuxApplyAvatarInputShape({
+      isDestroyed: () => false,
+      getContentBounds: () => ({ x: 5743, y: 936, width: 356, height: 320 }),
+      setShape() {
+        throw new Error("unsupported");
+      },
+    }),
+    false,
+  );
 });
 
 test("keeps avatar overlay layout sync working after layout alias drift", () => {
