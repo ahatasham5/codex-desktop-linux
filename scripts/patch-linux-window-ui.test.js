@@ -4562,6 +4562,44 @@ test("adds Linux desktop settings when the lazy route map is hoisted into a sepa
   }
 });
 
+test("composes Linux desktop section metadata and route patches in the same asset", () => {
+  const routeChunkName = "app-initial~app-main~automations-page-A.js";
+  const { extractedDir, assetsDir } = createSplitRouteNativeKeyboardShortcutsSettingsFixture({
+    routeChunkName,
+  });
+  const routeChunkPath = path.join(assetsDir, routeChunkName);
+  try {
+    fs.writeFileSync(
+      routeChunkPath,
+      [
+        fs.readFileSync(routeChunkPath, "utf8"),
+        "var Bj=`general-settings.import.profile.keyboard-shortcuts.codex-micro.appshots.appearance.pets.agent.git-settings.data-controls.cloud-settings.cloud-environments.code-review.personalization.usage.browser-use.computer-use.local-environments.worktrees.environments.mcp-settings.hooks-settings.connections.plugins-settings.skills-settings`.split(`.`);",
+        "var Uj=[{slug:`general-settings`},{slug:`import`},{slug:`profile`},{slug:`appearance`},{slug:`pets`},{slug:`appshots`},{slug:`git-settings`},{slug:`connections`},{slug:`cloud-settings`},{slug:`cloud-environments`},{slug:`code-review`},{slug:`local-environments`},{slug:`worktrees`},{slug:`agent`},{slug:`personalization`},{slug:`keyboard-shortcuts`},{slug:`usage`},{slug:`browser-use`},{slug:`computer-use`},{slug:`mcp-settings`},{slug:`hooks-settings`},{slug:`plugins-settings`},{slug:`skills-settings`},{slug:`data-controls`}];",
+      ].join(""),
+      "utf8",
+    );
+
+    const { value: result, warnings } = captureWarns(() => patchKeybindsSettingsAssets(extractedDir));
+
+    assert.equal(result.matched, true);
+    assert.deepEqual(warnings, []);
+
+    const routeChunkSource = fs.readFileSync(routeChunkPath, "utf8");
+    assert.match(
+      routeChunkSource,
+      /"linux-desktop":\(0,Ya\.lazy\)\(\(\)=>Pr\(\(\)=>import\(`\.\/linux-desktop-settings-linux\.js`\),\[\],import\.meta\.url\)\),"general-settings":/,
+    );
+    assert.match(routeChunkSource, /Bj=`general-settings\.linux-desktop\.import\.profile\.keyboard-shortcuts/);
+    assert.match(routeChunkSource, /Uj=\[\{slug:`general-settings`\},\{slug:`linux-desktop`\},\{slug:`import`\}/);
+
+    const secondResult = patchKeybindsSettingsAssets(extractedDir);
+    assert.equal(secondResult.matched, true);
+    assert.equal(secondResult.changed, 0);
+  } finally {
+    fs.rmSync(extractedDir, { recursive: true, force: true });
+  }
+});
+
 test("finds Linux desktop settings route map in hashed settings-page chunks", () => {
   const routeChunkName = "app-initial~settings-page-A.js";
   const { extractedDir, assetsDir } = createSplitRouteNativeKeyboardShortcutsSettingsFixture({
@@ -4596,6 +4634,32 @@ test("adds Linux desktop section to current native Keyboard Shortcuts sections b
 
   assert.match(patched, /e=\[`general-settings`,`linux-desktop`,`profile`,`keyboard-shortcuts`/);
   assert.match(patched, /r=\[\{slug:`general-settings`\},\{slug:`linux-desktop`\},\{slug:`profile`\}/);
+});
+
+test("adds Linux desktop section to split current section metadata bundle", () => {
+  const source = [
+    "var Bj=`general-settings.import.profile.keyboard-shortcuts.codex-micro.appshots.appearance.pets.agent.git-settings.data-controls.cloud-settings.cloud-environments.code-review.personalization.usage.browser-use.computer-use.local-environments.worktrees.environments.mcp-settings.hooks-settings.connections.plugins-settings.skills-settings`.split(`.`);",
+    "var Uj=[{slug:`general-settings`},{slug:`import`},{slug:`profile`},{slug:`appearance`},{slug:`pets`},{slug:`appshots`},{slug:`git-settings`},{slug:`connections`},{slug:`cloud-settings`},{slug:`cloud-environments`},{slug:`code-review`},{slug:`local-environments`},{slug:`worktrees`},{slug:`agent`},{slug:`personalization`},{slug:`keyboard-shortcuts`},{slug:`usage`},{slug:`browser-use`},{slug:`computer-use`},{slug:`mcp-settings`},{slug:`hooks-settings`},{slug:`plugins-settings`},{slug:`skills-settings`},{slug:`data-controls`}];",
+  ].join("");
+
+  const patched = applyPatchTwice(applyLinuxDesktopSettingsSectionsPatch, source);
+
+  assert.match(patched, /Bj=`general-settings\.linux-desktop\.import\.profile\.keyboard-shortcuts/);
+  assert.match(patched, /Uj=\[\{slug:`general-settings`\},\{slug:`linux-desktop`\},\{slug:`import`\}/);
+});
+
+test("adds Linux desktop section to duplicate section metadata shapes in one asset", () => {
+  const source = [
+    "var e=[`general-settings`,`profile`,`keyboard-shortcuts`,`account`],r=[`general-settings`,`import`,`keyboard-shortcuts`,`usage`];",
+    "var Bj=`general-settings.profile.keyboard-shortcuts`.split(`.`),Cj=`general-settings.import.keyboard-shortcuts`.split(`.`);",
+    "var Uj=[{slug:`general-settings`},{slug:`profile`},{slug:`keyboard-shortcuts`}],Vj=[{slug:`general-settings`},{slug:`appearance`},{slug:`keyboard-shortcuts`}];",
+  ].join("");
+
+  const patched = applyPatchTwice(applyLinuxDesktopSettingsSectionsPatch, source);
+
+  assert.equal([...patched.matchAll(/=\[`general-settings`,`linux-desktop`,/g)].length, 2);
+  assert.equal([...patched.matchAll(/`general-settings\.linux-desktop\.[^`]*keyboard-shortcuts[^`]*`\.split\(`\.`\)/g)].length, 2);
+  assert.equal([...patched.matchAll(/=\[\{slug:`general-settings`\},\{slug:`linux-desktop`\},/g)].length, 2);
 });
 
 test("adds the Linux desktop section title when the JSX message component identifier drifts", () => {

@@ -577,6 +577,7 @@ function collectOptionalAssetPatches(extractedDir, filenamePattern, patchFn) {
         filePath,
         currentSource,
         patchedSource: patchFn(currentSource),
+        patchFn,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -610,6 +611,7 @@ function collectOptionalMatchingAssetPatches(extractedDir, predicate, patchFn) {
         filePath,
         currentSource,
         patchedSource: patchFn(currentSource),
+        patchFn,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -651,7 +653,21 @@ function collectLinuxDesktopRouteAndNavigationPatches(extractedDir) {
       patchedSource = applyLinuxDesktopSettingsNavigationPatch(patchedSource);
     }
     if (patchedSource !== currentSource) {
-      patches.push({ filePath, currentSource, patchedSource });
+      patches.push({
+        filePath,
+        currentSource,
+        patchedSource,
+        patchFn(source) {
+          let nextSource = source;
+          if (isSettingsRouteBundleSource(nextSource)) {
+            nextSource = applyLinuxDesktopSettingsRoutePatch(nextSource);
+          }
+          if (isSettingsNavigationBundleSource(nextSource)) {
+            nextSource = applyLinuxDesktopSettingsNavigationPatch(nextSource);
+          }
+          return nextSource;
+        },
+      });
     }
   }
 
@@ -697,6 +713,34 @@ function hasNativeKeyboardShortcutsSettings(extractedDir) {
   return true;
 }
 
+function applyCollectedAssetPatchWrites(patches) {
+  const firstSourcesByPath = new Map();
+  const latestSourcesByPath = new Map();
+  let changed = 0;
+
+  for (const patch of patches) {
+    if (!firstSourcesByPath.has(patch.filePath)) {
+      firstSourcesByPath.set(patch.filePath, patch.currentSource);
+    }
+    const currentSource = latestSourcesByPath.get(patch.filePath) ?? patch.currentSource;
+    const patchedSource = currentSource === patch.currentSource || typeof patch.patchFn !== "function"
+      ? patch.patchedSource
+      : patch.patchFn(currentSource);
+    if (patchedSource !== currentSource) {
+      changed += 1;
+    }
+    latestSourcesByPath.set(patch.filePath, patchedSource);
+  }
+
+  for (const [filePath, patchedSource] of latestSourcesByPath) {
+    if (patchedSource !== firstSourcesByPath.get(filePath)) {
+      fs.writeFileSync(filePath, patchedSource, "utf8");
+    }
+  }
+
+  return changed;
+}
+
 function patchKeybindsSettingsAssets(extractedDir) {
   try {
     if (!hasNativeKeyboardShortcutsSettings(extractedDir)) {
@@ -731,12 +775,7 @@ function patchKeybindsSettingsAssets(extractedDir) {
     }
     fs.writeFileSync(settingsAsset.filePath, settingsAsset.source, "utf8");
     let changed = generatedWrites.length + (previousSettingsSource !== settingsAsset.source ? 1 : 0);
-    for (const patch of patches) {
-      if (patch.patchedSource !== patch.currentSource) {
-        fs.writeFileSync(patch.filePath, patch.patchedSource, "utf8");
-        changed += 1;
-      }
-    }
+    changed += applyCollectedAssetPatchWrites(patches);
     return {
       matched: true,
       changed,
@@ -777,56 +816,32 @@ function applyKeybindsSettingsSectionsPatch(currentSource) {
 
 function applyLinuxDesktopSettingsSectionsPatch(currentSource) {
   let patchedSource = currentSource;
+  const unpatchedArrayOrderPattern = /([A-Za-z_$][\w$]*=\[`general-settings`,)(?!`linux-desktop`,)/g;
+  const unpatchedSplitOrderPattern = /(`general-settings\.)(?!linux-desktop\.)([^`]*keyboard-shortcuts[^`]*`\.split\(`\.`\))/g;
+  const unpatchedObjectSlugListPattern = /([A-Za-z_$][\w$]*=\[\{slug:(?:`general-settings`|[A-Za-z_$][\w$]*)\},)(?!\{slug:`linux-desktop`\},)/g;
+  const hasUnpatchedEligibleSectionShape = (source) =>
+    /[A-Za-z_$][\w$]*=\[`general-settings`,(?!`linux-desktop`,)/.test(source) ||
+    /`general-settings\.(?!linux-desktop\.)[^`]*keyboard-shortcuts[^`]*`\.split\(`\.`\)/.test(source) ||
+    /[A-Za-z_$][\w$]*=\[\{slug:(?:`general-settings`|[A-Za-z_$][\w$]*)\},(?!\{slug:`linux-desktop`\},)/.test(source);
 
-  if (
-    patchedSource.includes("slug:`linux-desktop`") &&
-    (/=\[`general-settings`,`linux-desktop`/.test(patchedSource)
-      || /`general-settings\.linux-desktop\.[^`]*`\.split\(`\.`\)/.test(patchedSource))
-  ) {
+  if (!hasUnpatchedEligibleSectionShape(patchedSource)) {
     return patchedSource;
   }
 
-  if (!/=\[`general-settings`,`linux-desktop`/.test(patchedSource)) {
-    const orderPattern = /([A-Za-z_$][\w$]*=\[`general-settings`,)(?!`linux-desktop`)/;
-    if (orderPattern.test(patchedSource)) {
-      patchedSource = patchedSource.replace(orderPattern, "$1`linux-desktop`,");
-    }
-  }
+  patchedSource = patchedSource.replace(
+    unpatchedArrayOrderPattern,
+    "$1`linux-desktop`,",
+  );
+  patchedSource = patchedSource.replace(
+    unpatchedSplitOrderPattern,
+    "$1linux-desktop.$2",
+  );
+  patchedSource = patchedSource.replace(
+    unpatchedObjectSlugListPattern,
+    "$1{slug:`linux-desktop`},",
+  );
 
-  if (!/`general-settings\.linux-desktop\.[^`]*`\.split\(`\.`\)/.test(patchedSource)) {
-    const splitOrderPattern = /(`general-settings\.)(?!linux-desktop\.)([^`]*keyboard-shortcuts[^`]*`\.split\(`\.`\))/;
-    if (splitOrderPattern.test(patchedSource)) {
-      patchedSource = patchedSource.replace(splitOrderPattern, "$1linux-desktop.$2");
-    }
-  }
-
-  if (!patchedSource.includes("slug:`linux-desktop`")) {
-    const sectionsNeedle = "var e=`general-settings`,t=`mcp-settings`,n=[{slug:e},";
-    const sectionsPatch = "var e=`general-settings`,t=`mcp-settings`,n=[{slug:e},{slug:`linux-desktop`},";
-    if (patchedSource.includes(sectionsNeedle)) {
-      patchedSource = patchedSource.replace(sectionsNeedle, sectionsPatch);
-    } else {
-      const currentNeedle = "n=[{slug:e},{slug:`appearance`}";
-      if (patchedSource.includes(currentNeedle)) {
-        patchedSource = patchedSource.replace(currentNeedle, "n=[{slug:e},{slug:`linux-desktop`},{slug:`appearance`}");
-      } else {
-        const literalNeedle = "n=[{slug:`general-settings`},{slug:`appearance`}";
-        if (patchedSource.includes(literalNeedle)) {
-          patchedSource = patchedSource.replace(literalNeedle, "n=[{slug:`general-settings`},{slug:`linux-desktop`},{slug:`appearance`}");
-        } else {
-          const generalFirstPattern = /([A-Za-z_$][\w$]*=\[\{slug:(?:`general-settings`|[A-Za-z_$][\w$]*)\},)/;
-          if (generalFirstPattern.test(patchedSource)) {
-            patchedSource = patchedSource.replace(generalFirstPattern, "$1{slug:`linux-desktop`},");
-          }
-        }
-      }
-    }
-  }
-
-  if (
-    patchedSource.includes("slug:`linux-desktop`") &&
-    (/=\[`general-settings`,`linux-desktop`/.test(patchedSource) || !/[A-Za-z_$][\w$]*=\[`general-settings`,/.test(currentSource))
-  ) {
+  if (!hasUnpatchedEligibleSectionShape(patchedSource)) {
     return patchedSource;
   }
 
