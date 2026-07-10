@@ -18,6 +18,11 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[path = "../chrome_runtime.rs"]
+mod chrome_runtime;
+
+use chrome_runtime::RuntimeManager;
+
 const HOST_NAME: &str = "com.openai.codexextension";
 const SOCKET_DIR_ENV: &str = "CODEX_BROWSER_USE_SOCKET_DIR";
 const SESSIONS_DIR_ENV: &str = "CODEX_BROWSER_USE_SESSIONS_DIR";
@@ -74,6 +79,7 @@ struct HostState {
     next_client_id: usize,
     next_chrome_id: u64,
     next_client_request_id: u64,
+    runtime_manager: Arc<RuntimeManager>,
 }
 
 impl HostState {
@@ -81,6 +87,7 @@ impl HostState {
         stdout: SharedChromeWriter,
         rollout_tracker: RolloutTracker,
         extension_id: Option<String>,
+        runtime_manager: Arc<RuntimeManager>,
     ) -> Self {
         Self {
             stdout,
@@ -92,6 +99,7 @@ impl HostState {
             next_client_id: 1,
             next_chrome_id: 1,
             next_client_request_id: 1,
+            runtime_manager,
         }
     }
 
@@ -314,10 +322,12 @@ fn main() -> Result<()> {
     let stdout: SharedChromeWriter = Arc::new(Mutex::new(Box::new(io::stdout())));
     let rollout_tracker = RolloutTracker::new(Arc::clone(&stdout));
     let extension_id = extension_id_from_args();
+    let runtime_manager = Arc::new(RuntimeManager::new(extension_id.clone()));
     let state = Arc::new(Mutex::new(HostState::new(
         stdout,
         rollout_tracker,
         extension_id,
+        Arc::clone(&runtime_manager),
     )));
 
     log(&format!("listening on {}", socket_path.display()));
@@ -328,6 +338,7 @@ fn main() -> Result<()> {
     }
 
     let result = read_chrome_messages(Arc::clone(&state));
+    runtime_manager.shutdown();
     remove_socket_if_present(&socket_path)?;
     result
 }
@@ -607,6 +618,19 @@ fn handle_client_message(state: &SharedState, client_id: usize, message: Value) 
 }
 
 fn handle_chrome_message(state: &SharedState, message: Value) {
+    if chrome_runtime::is_runtime_request(&message) {
+        let runtime_manager = {
+            let state = state.lock().expect("host state mutex poisoned");
+            Arc::clone(&state.runtime_manager)
+        };
+        // App-server children use PR_SET_PDEATHSIG. Launch them from this
+        // long-lived native-messaging thread, not a short-lived request worker.
+        let response = runtime_manager.handle_request(&message);
+        let state = state.lock().expect("host state mutex poisoned");
+        state.send_chrome(&response);
+        return;
+    }
+
     if is_response(&message) {
         let Some(id) = message_id_as_str(&message) else {
             return;
@@ -1022,6 +1046,161 @@ mod tests {
     }
 
     #[test]
+    fn handles_runtime_hello_without_a_browser_client() {
+        let (host_state, output) = test_host_state_with_output();
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_chrome_message(
+            &state,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "native-host:1",
+                "method": "codexRuntime/hello",
+                "params": {
+                    "constraints": {
+                        "extensionBuildChannel": "prod",
+                        "extensionId": "abcdefghijklmnopabcdefghijklmnop",
+                        "extensionVersion": "1.2.27203.26575",
+                        "nativeHostName": HOST_NAME,
+                        "requiredAppServerProtocolVersion": 2,
+                        "requiredNativeHostProtocolVersion": 2
+                    }
+                }
+            }),
+        );
+
+        let response = read_captured_message(&output);
+        assert_eq!(response["id"], "native-host:1");
+        assert_eq!(response["result"]["manifestSchemaVersion"], 2);
+        assert_eq!(response["result"]["nativeHostProtocolVersion"], 2);
+        assert_eq!(response["result"]["supportedProtocolVersions"], json!([2]));
+    }
+
+    #[test]
+    fn runtime_ensure_keeps_child_alive_after_request_returns() {
+        let root = unique_test_dir("codex-runtime-child");
+        let codex_home = root.join("codex-home");
+        let resources = root.join("resources");
+        let runtime_root = root.join("runtime");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::create_dir_all(&resources).unwrap();
+        fs::set_permissions(&codex_home, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&resources, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let fake_cli = root.join("fake-app-server");
+        fs::write(
+            &fake_cli,
+            r#"#!/usr/bin/python3
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+listen = sys.argv[sys.argv.index("--listen") + 1]
+path = listen.removeprefix("unix://")
+descendant = subprocess.Popen(["sleep", "300"])
+Path(__file__).with_name("descendant.pid").write_text(str(descendant.pid))
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(path)
+server.listen()
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+while True:
+    time.sleep(0.1)
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&fake_cli, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let extension_id = "abcdefghijklmnopabcdefghijklmnop";
+        let current_exe = PathBuf::from("/proc/self/exe");
+        let manifest_path = root.join("chrome-native-hosts-v2.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec(&json!({
+                "schemaVersion": 2,
+                "entries": [{
+                    "schemaVersion": 2,
+                    "appServerProtocolVersion": 2,
+                    "appVersion": "1.2.3",
+                    "channel": "prod",
+                    "cliVersion": "1.2.3",
+                    "entryId": "runtime-test",
+                    "extensionBuildChannels": ["prod"],
+                    "extensionIds": [extension_id],
+                    "installId": "install-test",
+                    "nativeHostNames": [HOST_NAME],
+                    "nativeHostProtocolVersion": 2,
+                    "nativeHostVersion": "1.2.3",
+                    "paths": {
+                        "codexCliPath": fake_cli,
+                        "codexHome": codex_home,
+                        "extensionHostPath": current_exe,
+                        "nodePath": "/bin/true",
+                        "resourcesPath": resources
+                    },
+                    "proxyHost": "127.0.0.1",
+                    "proxyPort": 0,
+                    "updatedAt": "2026-07-10T00:00:00Z"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let runtime_manager = Arc::new(RuntimeManager::for_test(
+            extension_id.to_string(),
+            runtime_root.clone(),
+            manifest_path,
+        ));
+        let (mut host_state, output) = test_host_state_with_output();
+        host_state.runtime_manager = Arc::clone(&runtime_manager);
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_chrome_message(
+            &state,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "native-host:ensure",
+                "method": "codexRuntime/ensure",
+                "params": {
+                    "constraints": {
+                        "extensionBuildChannel": "prod",
+                        "extensionId": extension_id,
+                        "extensionVersion": "1.2.3",
+                        "nativeHostName": HOST_NAME,
+                        "requiredAppServerProtocolVersion": 2,
+                        "requiredNativeHostProtocolVersion": 2
+                    },
+                    "clientId": "sidepanel-window-test"
+                }
+            }),
+        );
+
+        let response = read_captured_message(&output);
+        assert_eq!(response["id"], "native-host:ensure");
+        assert_eq!(response["result"]["connected"], true);
+        assert_eq!(runtime_manager.running_process_count(), 1);
+        let descendant_pid: libc::pid_t = fs::read_to_string(root.join("descendant.pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(unsafe { libc::kill(descendant_pid, 0) }, 0);
+
+        runtime_manager.shutdown();
+        assert_eq!(runtime_manager.running_process_count(), 0);
+        assert!(!runtime_root.exists());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && process_is_live(descendant_pid) {
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(!process_is_live(descendant_pid));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn replacing_browser_client_evicts_stale_clients_and_pending_requests() {
         let mut state = test_host_state();
 
@@ -1290,6 +1469,9 @@ mod tests {
                 sessions_root: None,
             },
             Some("abcdefghijklmnopabcdefghijklmnop".to_string()),
+            Arc::new(RuntimeManager::new(Some(
+                "abcdefghijklmnopabcdefghijklmnop".to_string(),
+            ))),
         )
     }
 
@@ -1308,6 +1490,9 @@ mod tests {
                 sessions_root: None,
             },
             Some("abcdefghijklmnopabcdefghijklmnop".to_string()),
+            Arc::new(RuntimeManager::new(Some(
+                "abcdefghijklmnopabcdefghijklmnop".to_string(),
+            ))),
         );
         (state, output)
     }
@@ -1316,6 +1501,15 @@ mod tests {
         let data = output.lock().unwrap().clone();
         let mut cursor = io::Cursor::new(data);
         read_frame(&mut cursor).unwrap().unwrap()
+    }
+
+    fn process_is_live(pid: libc::pid_t) -> bool {
+        let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        stat.rsplit_once(')')
+            .and_then(|(_, suffix)| suffix.trim_start().chars().next())
+            .is_some_and(|state| state != 'Z')
     }
 
     struct CaptureWriter {
