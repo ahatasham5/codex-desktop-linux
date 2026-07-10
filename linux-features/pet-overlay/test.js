@@ -2,6 +2,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -22,7 +23,7 @@ const {
 function copyFeatureTo(featuresRoot) {
   const featureDir = path.join(featuresRoot, "pet-overlay");
   fs.mkdirSync(featureDir, { recursive: true });
-  for (const name of ["feature.json", "README.md", "patch.js", "gpu-compositing.env"]) {
+  for (const name of ["feature.json", "README.md", "patch.js", "launcher-hook.sh"]) {
     fs.copyFileSync(path.join(__dirname, name), path.join(featureDir, name));
   }
 }
@@ -152,7 +153,7 @@ test("pet-overlay is discoverable and disabled until listed in features.json", (
     const plan = enabledLinuxFeatureInstallPlan({ featuresRoot });
     assert.deepEqual(
       plan.runtimeHooks.map((hook) => [hook.key, hook.target, hook.mode.toString(8)]),
-      [["env", ".codex-linux/env.d/pet-overlay-gpu-compositing.env", "644"]],
+      [["launcher", ".codex-linux/launcher.d/pet-overlay-gpu-compositing-default.sh", "755"]],
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -165,16 +166,34 @@ test("ships only overlay behavior, not selector/default/custom pet changes", () 
 
   assert.equal(manifest.defaultEnabled, false);
   assert.equal(manifest.entrypoints.patchDescriptors, "./patch.js");
-  assert.deepEqual(manifest.runtimeHooks.env, {
-    source: "gpu-compositing.env",
-    name: "gpu-compositing.env",
-    mode: "0644",
+  assert.deepEqual(manifest.runtimeHooks.launcher, {
+    source: "launcher-hook.sh",
+    name: "gpu-compositing-default.sh",
+    mode: "0755",
   });
-  assert.match(
-    fs.readFileSync(path.join(__dirname, "gpu-compositing.env"), "utf8"),
-    /^CODEX_ELECTRON_DISABLE_GPU_COMPOSITING=0$/m,
-  );
+  assert.match(fs.readFileSync(path.join(__dirname, "launcher-hook.sh"), "utf8"), /GPU_COMPOSITING/);
   assert.doesNotMatch(patchSource, /custom:los|DEFAULT_PET|selected-avatar-id|avatarMenuItems|pets\/los/);
+});
+
+test("GPU compositing launcher default preserves an explicit user override", () => {
+  const hook = path.join(__dirname, "launcher-hook.sh");
+  const run = (value) => spawnSync("bash", [hook], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      ...(value == null ? {} : { CODEX_ELECTRON_DISABLE_GPU_COMPOSITING: value }),
+    },
+  });
+
+  const defaulted = run(null);
+  assert.equal(defaulted.status, 0, defaulted.stderr);
+  assert.equal(defaulted.stdout.trim(), "env CODEX_ELECTRON_DISABLE_GPU_COMPOSITING=0");
+
+  for (const value of ["0", "1"]) {
+    const explicit = run(value);
+    assert.equal(explicit.status, 0, explicit.stderr);
+    assert.equal(explicit.stdout, "", value);
+  }
 });
 
 test("patches current avatar overlay layout, transparency, and window sync", () => {

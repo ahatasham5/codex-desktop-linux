@@ -70,6 +70,11 @@ CODEX_PET_OVERLAY_LOCK_POSITION=1
 CODEX_PET_OVERLAY_HYPRLAND=0
 ```
 
+The feature keeps GPU compositing enabled by default so the transparent overlay
+can render correctly. An explicit user value takes precedence: launching with
+`CODEX_ELECTRON_DISABLE_GPU_COMPOSITING=1` still enables the documented Wayland
+stability workaround if the main window flickers or leaves stale frame trails.
+
 The legacy `CODEX_PET_LINUX_*` names from the prototype are still accepted for
 local compatibility.
 

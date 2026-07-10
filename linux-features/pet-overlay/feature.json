@@ -7,10 +7,10 @@
     "patchDescriptors": "./patch.js"
   },
   "runtimeHooks": {
-    "env": {
-      "source": "gpu-compositing.env",
-      "name": "gpu-compositing.env",
-      "mode": "0644"
+    "launcher": {
+      "source": "launcher-hook.sh",
+      "name": "gpu-compositing-default.sh",
+      "mode": "0755"
     }
   },
   "petOverlay": {
