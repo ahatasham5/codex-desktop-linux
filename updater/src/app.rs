@@ -973,13 +973,7 @@ async fn run_check_cycle(
             return Ok(());
         }
 
-        if state
-            .rollback_blocked_candidate_version
-            .as_deref()
-            .is_some_and(|blocked| {
-                installed_version_matches_candidate(blocked, &downloaded.candidate_version)
-            })
-        {
+        if rollback_blocks_candidate(state, &downloaded.sha256, &downloaded.candidate_version) {
             state.status = UpdateStatus::Idle;
             state.error_message = Some(format!(
                 "Candidate {} was rolled back and will not be reinstalled automatically",
@@ -1397,6 +1391,7 @@ fn complete_pending_install_if_already_installed(
     state.status = UpdateStatus::Installed;
     state.waiting_for_app_exit_auto_install = false;
     state.candidate_version = None;
+    clear_rollback_blocked_candidate(state);
     if !candidate_is_installed {
         state.artifact_paths.package_path = None;
     }
@@ -1422,6 +1417,7 @@ fn recover_interrupted_install(state: &mut PersistedState, paths: &RuntimePaths)
         state.status = UpdateStatus::Installed;
         state.waiting_for_app_exit_auto_install = false;
         state.candidate_version = None;
+        clear_rollback_blocked_candidate(state);
         if !candidate_is_installed {
             state.artifact_paths.package_path = None;
         }
@@ -1486,6 +1482,25 @@ fn installed_version_matches_candidate(installed: &str, candidate: &str) -> bool
         Some(_) => false,
         None => installed == candidate,
     }
+}
+
+fn rollback_blocks_candidate(
+    state: &PersistedState,
+    candidate_sha256: &str,
+    candidate_version: &str,
+) -> bool {
+    match state.rollback_blocked_dmg_sha256.as_deref() {
+        Some(blocked_sha256) => blocked_sha256 == candidate_sha256,
+        None => state
+            .rollback_blocked_candidate_version
+            .as_deref()
+            .is_some_and(|blocked| installed_version_matches_candidate(blocked, candidate_version)),
+    }
+}
+
+fn clear_rollback_blocked_candidate(state: &mut PersistedState) {
+    state.rollback_blocked_candidate_version = None;
+    state.rollback_blocked_dmg_sha256 = None;
 }
 
 fn compare_generated_versions(left: &str, right: &str) -> Option<std::cmp::Ordering> {
@@ -1667,7 +1682,7 @@ async fn trigger_install(
         state.waiting_for_app_exit_auto_install = false;
         state.installed_version = install::installed_package_version();
         state.candidate_version = None;
-        state.rollback_blocked_candidate_version = None;
+        clear_rollback_blocked_candidate(state);
         state.error_message = None;
         state.notified_events.clear();
         cache_cleanup::normalize_artifact_workspace_dir(workspace_root, state);
@@ -3349,6 +3364,8 @@ mod tests {
         state.status = UpdateStatus::ReadyToInstall;
         state.installed_version = "2026.04.28.082247-abcdef12.fc43".to_string();
         state.candidate_version = Some("2026.04.28.082247+abcdef12".to_string());
+        state.rollback_blocked_candidate_version = Some("2026.04.20.120000".to_string());
+        state.rollback_blocked_dmg_sha256 = Some("rolled-back-dmg-sha256".to_string());
         state.error_message = Some("authentication was not obtained".to_string());
         state
             .notified_events
@@ -3361,6 +3378,8 @@ mod tests {
 
         assert_eq!(state.status, UpdateStatus::Installed);
         assert_eq!(state.candidate_version, None);
+        assert_eq!(state.rollback_blocked_candidate_version, None);
+        assert_eq!(state.rollback_blocked_dmg_sha256, None);
         assert_eq!(state.error_message, None);
         assert!(state.notified_events.is_empty());
         Ok(())
@@ -3663,6 +3682,56 @@ mod tests {
         assert_eq!(compare_generated_versions("0.34.1", "0.35.0"), None);
     }
 
+    #[test]
+    fn rollback_blocks_same_dmg_hash_at_a_different_timestamp() {
+        let mut state = PersistedState::new(true);
+        state.rollback_blocked_candidate_version = Some("2026.05.04.131500+badcafe0".to_string());
+        state.rollback_blocked_dmg_sha256 = Some("same-full-sha256".to_string());
+
+        assert!(rollback_blocks_candidate(
+            &state,
+            "same-full-sha256",
+            "2026.05.05.090000+badcafe0"
+        ));
+    }
+
+    #[test]
+    fn rollback_hash_mismatch_is_not_overridden_by_legacy_version_match() {
+        let mut state = PersistedState::new(true);
+        state.rollback_blocked_candidate_version = Some("2026.05.04.131500".to_string());
+        state.rollback_blocked_dmg_sha256 = Some("rolled-back-sha256".to_string());
+
+        assert!(!rollback_blocks_candidate(
+            &state,
+            "different-sha256",
+            "2026.05.04.131500+different"
+        ));
+    }
+
+    #[test]
+    fn rollback_legacy_version_fallback_applies_only_without_recorded_hash() {
+        let mut state = PersistedState::new(true);
+        state.rollback_blocked_candidate_version = Some("2026.05.04.131500".to_string());
+
+        assert!(rollback_blocks_candidate(
+            &state,
+            "unrecorded-sha256",
+            "2026.05.04.131500+newhash00"
+        ));
+    }
+
+    #[test]
+    fn successful_install_clears_both_rollback_block_identifiers() {
+        let mut state = PersistedState::new(true);
+        state.rollback_blocked_candidate_version = Some("2026.05.04.131500".to_string());
+        state.rollback_blocked_dmg_sha256 = Some("rolled-back-sha256".to_string());
+
+        clear_rollback_blocked_candidate(&mut state);
+
+        assert_eq!(state.rollback_blocked_candidate_version, None);
+        assert_eq!(state.rollback_blocked_dmg_sha256, None);
+    }
+
     #[tokio::test]
     async fn interrupted_install_becomes_installed_when_candidate_is_already_present() -> Result<()>
     {
@@ -3689,6 +3758,8 @@ mod tests {
         state.status = UpdateStatus::Installing;
         state.installed_version = "2026.04.01.035152".to_string();
         state.candidate_version = Some("2026.03.27.025604+1086e799".to_string());
+        state.rollback_blocked_candidate_version = Some("2026.03.20.120000".to_string());
+        state.rollback_blocked_dmg_sha256 = Some("rolled-back-dmg-sha256".to_string());
         state.artifact_paths.package_path = Some(package_path);
         state.artifact_paths.workspace_dir = Some(
             temp.path()
@@ -3699,6 +3770,8 @@ mod tests {
 
         assert_eq!(state.status, UpdateStatus::Installed);
         assert_eq!(state.candidate_version, None);
+        assert_eq!(state.rollback_blocked_candidate_version, None);
+        assert_eq!(state.rollback_blocked_dmg_sha256, None);
         assert_eq!(state.artifact_paths.package_path, None);
         assert_eq!(state.artifact_paths.workspace_dir, None);
         assert_eq!(state.error_message, None);
