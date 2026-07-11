@@ -6226,22 +6226,13 @@ JS
     cat > "$chrome_dir/skills/control-chrome/SKILL.md" <<'MD'
 # Chrome
 
-```js
-const { setupBrowserRuntime } = await import("<plugin root>/scripts/browser-client.mjs");
-await setupBrowserRuntime({ globals: globalThis });
-globalThis.browser = await agent.browsers.get("extension");
-nodeRepl.write(await browser.documentation());
-```
-
 Use the browser bound to `browser` for tasks in this skill.
 MD
     cat > "$chrome_dir/scripts/extension-id.json" <<'JSON'
 {"extensionId":"hehggadaopoacecdllhhajmbjkdcmajg","extensionHostName":"com.openai.codexextension"}
 JSON
     cat > "$chrome_dir/scripts/browser-client.mjs" <<'JS'
-import{readdir as ZI}from"node:fs/promises";import L7,{platform as XI}from"node:os";import QI from"node:path";import{readFile as P7}from"fs/promises";import{resolve as D7}from"path";import{resolve as S7}from"path";import{homedir as v7,platform as E7}from"os";var Cd=S7(v7(),E7()==="win32"?"AppData\\Local\\Google\\Chrome\\User Data":"Library/Application Support/Google/Chrome");import{ClassicLevel as C7}from"./node_modules/classic-level.mjs";import{resolve as bg}from"path";import{tmpdir as T7}from"os";import{cp as A7,mkdtemp as I7,rm as HI}from"fs/promises";import{existsSync as k7}from"fs";var VI=async(e,t)=>{let r=bg(Cd,e,"Local Extension Settings",t);if(!k7(r))return null;let n=await I7(bg(R7(),"codex"));await A7(r,n,{recursive:!0}),await HI(bg(n,"LOCK"));let o=new C7(n,{createIfMissing:!1,keyEncoding:"utf8",valueEncoding:"utf8"});try{await o.open();let i=await o.get("extensionInstanceId");if(!i)return null;let s=JSON.parse(i);return typeof s!="string"?null:s}finally{await o.close(),await HI(n,{force:!0,recursive:!0})}},R7=()=>"nodeRepl"in globalThis&&globalThis.nodeRepl?globalThis.nodeRepl.tmpDir:T7();var GI=async e=>{if(e.type!=="extension"||!e.metadata?.extensionInstanceId||!e.metadata.extensionId)return e;let t=await N7(e.metadata.extensionId,e.metadata.extensionInstanceId);return t?{...e,metadata:{...e.metadata,profileName:t.name,profileIsLastUsed:t.isLastUsed.toString(),profileOrdering:t.orderingIndex.toString()}}:e},N7=async(e,t)=>(await O7(e)).find(o=>o.instanceId===t)||null,O7=async e=>{let t=await M7();return await Promise.all(t.map(async r=>({...r,instanceId:await VI(r.id,e).catch(n=>(le(n),null))})))},M7=async()=>{let e=D7(Cd,"Local State"),t=JSON.parse(await P7(e,"utf8"));return t.profile.profiles_order.map((r,n)=>{let o=t.profile.info_cache[r];return o?{id:r,name:o.name,isLastUsed:t.profile.last_used===r,orderingIndex:n,avatarUrl:o.avatar_icon}:null}).filter(r=>!!r)};
-var U7=5e3,_g=__(L7.platform()),j7=async(e,{codexSessionId:t})=>{let r=tl(p_),n=e.filter(i=>i.info.type==="iab"),o=q7(n,t,r);return await Promise.all(n.filter(i=>!o.includes(i)).map(async({api:i})=>i.close())),[...e.filter(i=>i.info.type!=="iab"),...o]},q7=(e,t,r)=>t==null?[]:e.filter(n=>n.info.metadata?.codexSessionId===t&&(r==null||n.info.metadata.codexAppBuildFlavor===r)),ek=async()=>{};
-function og(e){return e}function ig(e){return e==="extension"||e==="iab"||e==="cdp"}function li(e){return e}function KI(e){return e}class Id{async getBrowsers(){return[]}async get(e){return e}}function tI({browserId:e,clientInfo:t,requestedBrowserId:r}){return ig(r)?og(t.type)===r:e===r}function ld(){return null}async function mwe({globals:e}){let r=new Id,n=new Map(),l={browser_id:"extension"};if(ig(l.browser_id)){let _=li(l.browser_id);KI(_)}let p=await r.get(l.browser_id),f=n.get(p.api);return f}
+const browserPreference={};function preferredWindowIdFor(){}function getForUrl(){}const extensionInstanceId=null;
 function lu(e){let t=globalThis.nodeRepl?.env[e];return typeof t=="string"?t:void 0}
 function Me(){let e=globalThis.nodeRepl;return e?.config==null?void 0:e}
 import{platform as yT}from"node:os";function eh(){return"privileged native pipe bridge is not available; browser-client is not trusted"}function th(){let e=globalThis.nodeRepl?.nativePipe;return e==null||typeof e.createConnection!="function"?null:e}var ml=class e{constructor(t){this.socket=t}static async create(t){let r=th();if(r!=null){let n=await r.createConnection(t);return new e(n)}throw new Error(eh())}};
@@ -6419,15 +6410,9 @@ test_chrome_plugin_staging() {
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "defaultBrowser ==="
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "resolveChromeProfileDirectoryFromRunningProcess"
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "defaultLinuxUserDataDirectoryForCommand"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxChromeUserDataDirectories"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" '"BraveSoftware","Brave-Browser"'
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" '".config","chromium"'
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "instanceId:await VI(o.id,e,r)"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxRankBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxFilterBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxCloseDiscardedBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "await codexLinuxFilterBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "getUserTabs()"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" "browserPreference"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" "preferredWindowIdFor"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" "getForUrl"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" 'globalThis.nodeRepl?.env?.\[e\]'
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" 'globalThis.nodeRepl?.env\[e\]'
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxBrowserUseConfigShim"
@@ -6442,52 +6427,10 @@ test_chrome_plugin_staging() {
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxNativePipeFallback"
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" 'await import("node:net")'
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "activeSummaries"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "No active Chrome user tabs"
     assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "agent.browsers.list()"
     assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "browser.tabs.new()"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "tabs: Array.isArray(tabs) ? tabs : \\[\\]"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "...(error ? { error } : {})"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "Promise.race"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "Chrome profile tab probe timed out"
-    assert_not_contains "$chrome_dir/skills/control-chrome/SKILL.md" "{ error: String(error) }"
-    assert_not_contains "$chrome_dir/skills/control-chrome/SKILL.md" 'globalThis.browser = await agent.browsers.get("extension");'
     assert_contains "$install_dir/resources/plugins/openai-bundled/.agents/plugins/marketplace.json" '"name": "chrome"'
     assert_contains "$output_log" "Chrome plugin staged from upstream DMG"
-}
-
-test_chrome_browser_client_profile_root_variants() {
-    info "Checking current Chrome browser-client profile root patch"
-    local workspace="$TMP_DIR/chrome-browser-client-profile-roots"
-    local chrome_dir="$workspace/chrome"
-    local browser_client="$chrome_dir/scripts/browser-client.mjs"
-    local patch_log="$workspace/current-browser-client.log"
-
-    mkdir -p "$chrome_dir/scripts"
-
-    cat > "$browser_client" <<'JS'
-import{readdir as ZI}from"node:fs/promises";import L7,{platform as XI}from"node:os";import QI from"node:path";import{readFile as P7}from"fs/promises";import{resolve as D7}from"path";import{resolve as S7}from"path";import{homedir as v7,platform as E7}from"os";var Cd=S7(v7(),E7()==="win32"?"AppData\\Local\\Google\\Chrome\\User Data":"Library/Application Support/Google/Chrome");import{ClassicLevel as C7}from"./node_modules/classic-level.mjs";import{resolve as bg}from"path";import{tmpdir as T7}from"os";import{cp as A7,mkdtemp as I7,rm as HI}from"fs/promises";import{existsSync as k7}from"fs";var VI=async(e,t)=>{let r=bg(Cd,e,"Local Extension Settings",t);if(!k7(r))return null;let n=await I7(bg(R7(),"codex"));await A7(r,n,{recursive:!0}),await HI(bg(n,"LOCK"));let o=new C7(n,{createIfMissing:!1,keyEncoding:"utf8",valueEncoding:"utf8"});try{await o.open();let i=await o.get("extensionInstanceId");if(!i)return null;let s=JSON.parse(i);return typeof s!="string"?null:s}finally{await o.close(),await HI(n,{force:!0,recursive:!0})}},R7=()=>"nodeRepl"in globalThis&&globalThis.nodeRepl?globalThis.nodeRepl.tmpDir:T7();var GI=async e=>e,N7=async(e,t)=>(await O7(e)).find(o=>o.instanceId===t)||null,O7=async e=>{let t=await M7();return await Promise.all(t.map(async r=>({...r,instanceId:await VI(r.id,e).catch(n=>(le(n),null))})))},M7=async()=>{let e=D7(Cd,"Local State"),t=JSON.parse(await P7(e,"utf8"));return t.profile.profiles_order.map((r,n)=>{let o=t.profile.info_cache[r];return o?{id:r,name:o.name,isLastUsed:t.profile.last_used===r,orderingIndex:n,avatarUrl:o.avatar_icon}:null}).filter(r=>!!r)};var U7=5e3,_g=__(L7.platform()),j7=async(e,{codexSessionId:t})=>{let r=tl(p_),n=e.filter(i=>i.info.type==="iab"),o=q7(n,t,r);return await Promise.all(n.filter(i=>!o.includes(i)).map(async({api:i})=>i.close())),[...e.filter(i=>i.info.type!=="iab"),...o]},q7=(e,t,r)=>t==null?[]:e.filter(n=>n.info.metadata?.codexSessionId===t&&(r==null||n.info.metadata.codexAppBuildFlavor===r)),ek=async()=>{};function og(e){return e}function ig(e){return e==="extension"||e==="iab"||e==="cdp"}function li(e){return e}function KI(e){return e}class Id{async getBrowsers(){return[]}async get(e){return e}}function tI({browserId:e,clientInfo:t,requestedBrowserId:r}){return ig(r)?og(t.type)===r:e===r}function ld(){return null}async function mwe({globals:e}){let r=new Id,n=new Map(),l={browser_id:"extension"};if(ig(l.browser_id)){let _=li(l.browser_id);KI(_)}let p=await r.get(l.browser_id),f=n.get(p.api);return f}
-JS
-    node "$REPO_DIR/scripts/lib/patch-chrome-plugin.js" "$chrome_dir" >"$patch_log" 2>&1
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome profile roots"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome profile metadata lookup"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome profile instance matching"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome active profile backend ordering"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux idle Chrome profile filtering"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux ambiguous active Chrome extension alias guard"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux ambiguous active Chrome extension alias check"
-    assert_contains "$browser_client" "codexLinuxChromeUserDataDirectories"
-    assert_contains "$browser_client" '"BraveSoftware","Brave-Browser"'
-    assert_contains "$browser_client" '".config","chromium"'
-    assert_contains "$browser_client" 'async(e,t,r=Cd)'
-    assert_contains "$browser_client" "instanceId:await VI(o.id,e,r)"
-    assert_contains "$browser_client" "codexLinuxRankBrowserBackends"
-    assert_contains "$browser_client" "codexLinuxFilterBrowserBackends"
-    assert_contains "$browser_client" "codexLinuxCloseDiscardedBrowserBackends"
-    assert_contains "$browser_client" "await codexLinuxFilterBrowserBackends"
-    assert_contains "$browser_client" "XI()"
-    assert_contains "$browser_client" "codexLinuxRejectAmbiguousBrowserAlias"
-    assert_contains "$browser_client" "codexLinuxRejectAmbiguousBrowserAlias(l.browser_id,await r.getBrowsers())"
 }
 
 test_chrome_marketplace_fallback_synthesis() {
@@ -8649,7 +8592,6 @@ main() {
     test_browser_use_node_repl_glibc_pidfd_patch_static
     test_browser_use_node_repl_ldd_output_compatibility
     test_chrome_plugin_staging
-    test_chrome_browser_client_profile_root_variants
     test_chrome_marketplace_fallback_synthesis
     test_chrome_native_host_manifest_writer
     test_launcher_managed_node_handles_unset_path

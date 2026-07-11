@@ -54,7 +54,7 @@ function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
   let sharedSettingsImport = null;
   let featureGateImport = null;
   for (const match of currentSource.matchAll(/import\{([^}]*)\}from"[^"]+"/gu)) {
-    const featureGateMatch = match[1].match(/\bE\$ as ([A-Za-z_$][\w$]*)\b/u);
+    const featureGateMatch = match[1].match(/\baG as ([A-Za-z_$][\w$]*)\b/u);
     if (featureGateMatch == null) {
       continue;
     }
@@ -117,9 +117,9 @@ function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
   }
 
   const importAdditions = [
-    "T2 as codexLinuxAccountInfoQuery",
-    "j7 as codexLinuxSuggestedPromptsEligible",
-    "qk as codexLinuxUseAuthSession",
+    "oJ as codexLinuxAccountInfoQuery",
+    "y1 as codexLinuxSuggestedPromptsEligible",
+    "lS as codexLinuxUseAuthSession",
   ].filter((specifier) => !sharedSettingsImport.specifiers.includes(specifier));
   const patchedImport = importAdditions.length === 0
     ? sharedSettingsImport.text

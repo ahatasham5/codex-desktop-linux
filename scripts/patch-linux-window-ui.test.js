@@ -392,7 +392,7 @@ test("Linux safe monospace font stack patch warns when the unsafe stack drifts",
 
 test("Linux settings search hides controls that cannot render", () => {
   const source = [
-    'import{E$ as l}from"./app-current.js";',
+    'import{aG as l}from"./app-current.js";',
     "function qn(e){let t=(0,Zn.c)(17),n=re(),r=Bn(e),{data:i}=_(e),a=i?.isSystemBackdropSupported!==!1,o=i?.platform===`darwin`,{data:s}=T(k,e.selectedHostId),c,l=c;if(a){let e;e=e=>e.sectionSlug===`appearance`&&!a?{...e,messages:e.messages.filter(Jn)}:e.sectionSlug===`agent`?{...e,terms:[]}:e,m=r.map(e)}else m=r;return m}",
     "function Jn(e){return!Qn.includes(e.id)}",
   ].join("");
@@ -407,7 +407,7 @@ test("Linux settings search hides controls that cannot render", () => {
   );
   assert.match(
     patched,
-    /T2 as codexLinuxAccountInfoQuery,j7 as codexLinuxSuggestedPromptsEligible,qk as codexLinuxUseAuthSession/,
+    /oJ as codexLinuxAccountInfoQuery,y1 as codexLinuxSuggestedPromptsEligible,lS as codexLinuxUseAuthSession/,
   );
   assert.match(
     patched,
@@ -535,7 +535,7 @@ test("Linux settings search hides controls that cannot render", () => {
 
 test("Linux settings search visibility patch warns on current-bundle drift", () => {
   const source =
-    'import{E$ as h}from"./app-current.js";function qn(e){return settingsSearchDocuments}';
+    'import{aG as h}from"./app-current.js";function qn(e){return settingsSearchDocuments}';
   const { value, warnings } = captureWarns(() =>
     applyLinuxSettingsSearchVisibilityPatch(source),
   );
